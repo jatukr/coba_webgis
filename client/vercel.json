@@ -1,8 +1,9 @@
 {
   "version": 2,
-  "buildCommand": "npm install --legacy-peer-deps && npm run build",
+  "buildCommand": "npm install --legacy-peer-deps --force && npm run build",
   "outputDirectory": "build",
   "framework": "create-react-app",
+  "installCommand": "npm install --legacy-peer-deps --force",
   "routes": [
     {
       "src": "/static/(.*)",
