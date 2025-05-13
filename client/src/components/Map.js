@@ -137,7 +137,7 @@ const colorMap = {
 
 function Map() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [markers, setMarkers] = useState([{ position: [-6.2088, 106.8456], name: 'Jakarta, Indonesia' }]);
+  const [markers, setMarkers] = useState([{ position: [-7.257562035423769, 112.75113124540582], name: 'Surabaya, Indonesia' }]);
   const [layers, setLayers] = useState(() => {
     // Load layers from localStorage on initial render
     const savedLayers = localStorage.getItem('mapLayers');
@@ -558,7 +558,7 @@ function Map() {
       </AppBar>
 
       <MapContainer
-        center={[-6.2088, 106.8456]}
+        center={[-7.2558591714853, 112.74357814457998]}
         zoom={13}
         style={{ height: '100%', width: '100%' }}
         ref={mapRef}
