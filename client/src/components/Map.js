@@ -484,7 +484,7 @@ function Map() {
 
   useEffect(() => {
     // Load layer kawasan konservasi saat pertama kali buka
-    fetch('/KK_BKSDA.geojson')
+    fetch('/kkbksda.geojson')
       .then(res => res.json())
       .then(data => {
         // Cek apakah layer kawasan konservasi sudah ada
