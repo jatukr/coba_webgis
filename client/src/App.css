@@ -45,3 +45,8 @@
   width: 100%;
   height: 100%;
 }
+
+.leaflet-bottom.leaflet-right .leaflet-draw-toolbar {
+  right: 10px !important; /* default 0, jadi geser ke kiri 10px */
+  margin-right: 10px !important;
+}

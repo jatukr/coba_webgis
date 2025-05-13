@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, LayersControl, GeoJSON, FeatureGroup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, LayersControl, GeoJSON, FeatureGroup, useMap } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
@@ -50,23 +50,89 @@ L.Icon.Default.mergeOptions({
 
 // Create a separate component for EditControl
 const DrawControl = ({ onCreated, onEdited, onDeleted }) => {
-  return (
-    <FeatureGroup>
-      <EditControl
-        position="topright"
-        onCreated={onCreated}
-        onEdited={onEdited}
-        onDeleted={onDeleted}
-        draw={{
-          rectangle: false,
-          circle: false,
-          circlemarker: false,
-          marker: false,
-          polyline: false
-        }}
-      />
-    </FeatureGroup>
-  );
+  const map = useMap();
+  const featureGroupRef = useRef();
+  
+  useEffect(() => {
+    if (!map) return;
+    
+    const featureGroup = new L.FeatureGroup();
+    map.addLayer(featureGroup);
+    featureGroupRef.current = featureGroup;
+
+    const drawControl = new L.Control.Draw({
+      position: 'bottomright',
+      draw: {
+        polygon: true,
+        rectangle: false,
+        circle: false,
+        circlemarker: false,
+        marker: false,
+        polyline: false
+      },
+      edit: {
+        featureGroup: featureGroup,
+        remove: true,
+        edit: {
+          selectedPathOptions: {
+            maintainColor: true,
+            dashArray: '10, 10'
+          }
+        }
+      }
+    });
+
+    map.addControl(drawControl);
+
+    map.on(L.Draw.Event.CREATED, (e) => {
+      const layer = e.layer;
+      featureGroup.addLayer(layer);
+      
+      // Add popup to the drawn shape
+      if (layer instanceof L.Polygon) {
+        layer.bindPopup(`
+          <div style="max-width: 300px;">
+            <h4 style="margin: 0 0 10px 0;">Drawn Shape</h4>
+            <p>Area: ${L.GeometryUtil.geodesicArea(layer.getLatLngs()[0]).toFixed(2)} m²</p>
+          </div>
+        `);
+      }
+      
+      if (onCreated) onCreated(e);
+    });
+
+    map.on(L.Draw.Event.EDITED, (e) => {
+      const layers = e.layers;
+      layers.eachLayer((layer) => {
+        if (layer instanceof L.Polygon) {
+          layer.bindPopup(`
+            <div style="max-width: 300px;">
+              <h4 style="margin: 0 0 10px 0;">Drawn Shape</h4>
+              <p>Area: ${L.GeometryUtil.geodesicArea(layer.getLatLngs()[0]).toFixed(2)} m²</p>
+            </div>
+          `);
+        }
+      });
+      if (onEdited) onEdited(e);
+    });
+
+    map.on(L.Draw.Event.DELETED, (e) => {
+      if (onDeleted) onDeleted(e);
+    });
+
+    return () => {
+      map.removeControl(drawControl);
+      map.removeLayer(featureGroup);
+    };
+  }, [map, onCreated, onEdited, onDeleted]);
+
+  return null;
+};
+
+const colorMap = {
+  CA: '#008000',    // hijau
+  SM: '#FFD700',    // kuning
+  TWA: '#FF0000'     // merah
 };
 
 function Map() {
@@ -153,7 +219,12 @@ function Map() {
       if (features.length > 0) {
         const fields = Object.keys(features[0].properties || {});
         setFieldOptions(fields);
-        if (!classifyField && fields.length > 0) setClassifyField(fields[0]);
+        // Otomatis pilih field FUNGSI jika ada
+        if (fields.includes('FUNGSI')) {
+          setClassifyField('FUNGSI');
+        } else if (!classifyField && fields.length > 0) {
+          setClassifyField(fields[0]);
+        }
       }
     }
   }, [layers, classifyField]);
@@ -231,12 +302,22 @@ function Map() {
     setIsLoading(true);
     try {
       let geojson;
-      const file = selectedFile[0];
-      
-      // Check if it's a ZIP file
-      if (file.name.toLowerCase().endsWith('.zip')) {
-        const zip = new JSZip();
-        const zipContent = await zip.loadAsync(file);
+      // Jika ZIP
+      if (selectedFile.length === 1 && selectedFile[0].name.toLowerCase().endsWith('.zip')) {
+        if (selectedFile[0].type !== 'application/zip' && selectedFile[0].type !== 'application/x-zip-compressed') {
+          alert('File yang diupload bukan file ZIP yang valid.');
+          return;
+        }
+        let zipContent;
+        try {
+          const arrayBuffer = await selectedFile[0].arrayBuffer();
+          const zip = new JSZip();
+          zipContent = await zip.loadAsync(arrayBuffer);
+        } catch (err) {
+          alert('File ZIP tidak valid atau rusak.');
+          console.error('JSZip error:', err);
+          return;
+        }
         
         // Find .shp and .dbf files
         const shpFile = Object.values(zipContent.files).find(f => f.name.toLowerCase().endsWith('.shp'));
@@ -255,40 +336,38 @@ function Map() {
         // Convert shapefile to GeoJSON
         geojson = await shapefile.read(shpBuffer, dbfBuffer);
       } 
-      // Check if it's a shapefile (has .shp extension)
-      else if (file.name.toLowerCase().endsWith('.shp')) {
-        const shpFile = Array.from(selectedFile).find(file => file.name.toLowerCase().endsWith('.shp'));
-        const dbfFile = Array.from(selectedFile).find(file => file.name.toLowerCase().endsWith('.dbf'));
-        
-        if (!shpFile || !dbfFile) {
-          throw new Error('Please upload both .shp and .dbf files');
-        }
-
-        const [shpBuffer, dbfBuffer] = await Promise.all([
-          shpFile.arrayBuffer(),
-          dbfFile.arrayBuffer()
-        ]);
-        
-        geojson = await shapefile.read(shpBuffer, dbfBuffer);
-      } 
-      // Handle regular GeoJSON file
-      else if (file.name.toLowerCase().endsWith('.geojson') || file.name.toLowerCase().endsWith('.json')) {
+      // Jika GeoJSON/JSON
+      else if (selectedFile.length === 1 && (
+        selectedFile[0].name.toLowerCase().endsWith('.geojson') ||
+        selectedFile[0].name.toLowerCase().endsWith('.json')
+      )) {
+        const file = selectedFile[0];
         const reader = new FileReader();
-        const result = await new Promise((resolve, reject) => {
+        geojson = await new Promise((resolve, reject) => {
           reader.onload = (e) => {
             try {
-              const geoJSON = JSON.parse(e.target.result);
-              resolve(geoJSON);
-            } catch (error) {
-              reject(error);
+              resolve(JSON.parse(e.target.result));
+            } catch (err) {
+              reject(err);
             }
           };
           reader.onerror = reject;
           reader.readAsText(file);
         });
-        geojson = result;
-      } else {
-        throw new Error('Unsupported file format. Please upload .zip, .shp/.dbf, or .geojson/.json files');
+      }
+      // Jika SHP/DBF
+      else {
+        // Cari file .shp dan .dbf
+        const shpFile = Array.from(selectedFile).find(file => file.name.toLowerCase().endsWith('.shp'));
+        const dbfFile = Array.from(selectedFile).find(file => file.name.toLowerCase().endsWith('.dbf'));
+        if (!shpFile || !dbfFile) {
+          throw new Error('Please upload both .shp and .dbf files');
+        }
+        const [shpBuffer, dbfBuffer] = await Promise.all([
+          shpFile.arrayBuffer(),
+          dbfFile.arrayBuffer()
+        ]);
+        geojson = await shapefile.read(shpBuffer, dbfBuffer);
       }
 
       // Add new layer to layers array
@@ -397,10 +476,39 @@ function Map() {
     setMarkers(markers.filter((_, i) => i !== index));
   };
 
+
   // Remove the useEffect that was initializing draw control manually
   useEffect(() => {
     if (!mapRef.current) return;
   }, [mapRef.current]);
+
+  useEffect(() => {
+    // Load layer kawasan konservasi saat pertama kali buka
+    fetch('/KK_BKSDA.geojson')
+      .then(res => res.json())
+      .then(data => {
+        // Cek apakah layer kawasan konservasi sudah ada
+        const existingLayer = layers.find(layer => layer.id === 'kawasan-konservasi');
+        if (!existingLayer) {
+          setLayers(layers => [
+            ...layers,
+            {
+              id: 'kawasan-konservasi',
+              name: 'Kawasan Konservasi',
+              data: data,
+              color: '#3388ff', // warna default (tidak digunakan karena akan pakai colorMap)
+              style: 'solid',
+              weight: 3,
+              opacity: 0.2,
+              timestamp: new Date().toISOString()
+            }
+          ]);
+        }
+      })
+      .catch(err => {
+        console.error('Gagal load layer kawasan konservasi:', err);
+      });
+  }, []); // Hapus layers dari dependency array
 
   return (
     <Box sx={{ 
@@ -411,6 +519,9 @@ function Map() {
         height: '100%',
         width: '100%',
         zIndex: 1
+      },
+      '& .leaflet-control-layers': {
+        transform: 'translateX(-10px) !important'
       }
     }}>
       <AppBar 
@@ -451,6 +562,7 @@ function Map() {
         zoom={13}
         style={{ height: '100%', width: '100%' }}
         ref={mapRef}
+        zoomControl={false}
       >
         <LayersControl position="bottomright">
           <LayersControl.BaseLayer checked name="OpenStreetMap">
@@ -493,44 +605,68 @@ function Map() {
               <GeoJSON 
                 data={layer.data}
                 style={feature => {
-                  let color = layer.color;
-                  if (classifyField && feature.properties) {
-                    if (categoryColors.__numeric) {
-                      // Numeric color ramp
-                      const v = parseFloat(feature.properties[classifyField]);
-                      const { min, max } = categoryColors;
-                      if (!isNaN(v) && min !== max) {
-                        color = chroma.scale(['#00f', '#0ff', '#0f0', '#ff0', '#f00']).domain([min, max])(v).hex();
-                      } else {
-                        color = '#888';
-                      }
-                    } else if (categoryColors[feature.properties[classifyField]]) {
-                      color = categoryColors[feature.properties[classifyField]];
-                    }
+                  // Untuk layer kawasan konservasi, gunakan colorMap berdasarkan FUNGSI
+                  if (layer.id === 'kawasan-konservasi') {
+                    const fungsi = feature.properties.FUNGSI;
+                    return {
+                      color: colorMap[fungsi] || '#3388ff',
+                      weight: 3,
+                      opacity: 1,
+                      fillOpacity: 0.5,
+                      fillColor: colorMap[fungsi] || '#3388ff'
+                    };
                   }
+                  // Untuk layer lain, gunakan style dari layer properties
                   return {
-                    ...getLayerStyle(layer),
-                    color,
-                    fillColor: color
+                    color: layer.color,
+                    weight: layer.weight,
+                    opacity: 1,
+                    fillOpacity: layer.opacity,
+                    fillColor: layer.color
                   };
                 }}
                 onEachFeature={(feature, leafletLayer) => {
                   if (feature.properties) {
-                    const popupContent = `
-                      <div style="max-width: 300px;">
-                        <h4 style="margin: 0 0 10px 0;">${layer.name}</h4>
-                        <table style="width: 100%; border-collapse: collapse;">
-                          ${Object.entries(feature.properties)
-                            .filter(([key, value]) => value !== undefined && value !== null)
-                            .map(([key, value]) => `
-                              <tr>
-                                <td style="padding: 4px; border-bottom: 1px solid #eee; font-weight: bold;">${key}</td>
-                                <td style="padding: 4px; border-bottom: 1px solid #eee;">${value}</td>
-                              </tr>
-                            `).join('')}
-                        </table>
-                      </div>
-                    `;
+                    let popupContent;
+                    if (layer.id === 'kawasan-konservasi') {
+                      // Khusus untuk layer kawasan konservasi, tampilkan FUNGSI di awal
+                      const fungsi = feature.properties.FUNGSI;
+                      popupContent = `
+                        <div style="max-width: 300px;">
+                          <h4 style="margin: 0 0 10px 0;">${layer.name}</h4>
+                          <div style="margin-bottom: 10px; padding: 8px; background-color: ${colorMap[fungsi] || '#3388ff'}; color: white; border-radius: 4px;">
+                            <strong>FUNGSI:</strong> ${fungsi || 'Tidak ada data'}
+                          </div>
+                          <table style="width: 100%; border-collapse: collapse;">
+                            ${Object.entries(feature.properties)
+                              .filter(([key, value]) => value !== undefined && value !== null && key !== 'FUNGSI')
+                              .map(([key, value]) => `
+                                <tr>
+                                  <td style="padding: 4px; border-bottom: 1px solid #eee; font-weight: bold;">${key}</td>
+                                  <td style="padding: 4px; border-bottom: 1px solid #eee;">${value}</td>
+                                </tr>
+                              `).join('')}
+                          </table>
+                        </div>
+                      `;
+                    } else {
+                      // Untuk layer lain, tampilkan semua properti seperti biasa
+                      popupContent = `
+                        <div style="max-width: 300px;">
+                          <h4 style="margin: 0 0 10px 0;">${layer.name}</h4>
+                          <table style="width: 100%; border-collapse: collapse;">
+                            ${Object.entries(feature.properties)
+                              .filter(([key, value]) => value !== undefined && value !== null)
+                              .map(([key, value]) => `
+                                <tr>
+                                  <td style="padding: 4px; border-bottom: 1px solid #eee; font-weight: bold;">${key}</td>
+                                  <td style="padding: 4px; border-bottom: 1px solid #eee;">${value}</td>
+                                </tr>
+                              `).join('')}
+                          </table>
+                        </div>
+                      `;
+                    }
                     leafletLayer.bindPopup(popupContent);
                   } else {
                     leafletLayer.bindPopup(`
@@ -546,18 +682,13 @@ function Map() {
           ))}
         </LayersControl>
 
-        <DrawControl
-          onCreated={_onCreated}
-          onEdited={_onEdited}
-          onDeleted={_onDeleted}
-        />
-
-        <div className="leaflet-control-container">
-          <div className="leaflet-control-zoom leaflet-bar leaflet-control" style={{ position: 'absolute', bottom: '20px', left: '10px' }}>
-            <button className="leaflet-control-zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
-            <button className="leaflet-control-zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
-          </div>
-        </div>
+        <FeatureGroup>
+          <DrawControl
+            onCreated={_onCreated}
+            onEdited={_onEdited}
+            onDeleted={_onDeleted}
+          />
+        </FeatureGroup>
 
         {markers.map((marker, index) => (
           <Marker key={index} position={marker.position}>
@@ -566,6 +697,13 @@ function Map() {
             </Popup>
           </Marker>
         ))}
+
+        <div className="leaflet-control-container">
+          <div className="leaflet-control-zoom leaflet-bar leaflet-control" style={{ position: 'absolute', bottom: '20px', left: '10px' }}>
+            <button className="leaflet-control-zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+            <button className="leaflet-control-zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+          </div>
+        </div>
       </MapContainer>
 
       <Drawer
@@ -585,7 +723,62 @@ function Map() {
             Kontrol Peta
           </Typography>
 
-          <SearchBox onFileUpload={handleFileSubmit} />
+          <TextField
+            fullWidth
+            size="small"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari lokasi..."
+            sx={{ mb: 1 }}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleSearch();
+              }
+            }}
+            InputProps={{
+              startAdornment: <SearchIcon sx={{ mr: 1, color: 'action.active' }} />,
+            }}
+          />
+          <Button
+            variant="contained"
+            onClick={handleSearch}
+            fullWidth
+            disabled={isLoading}
+            sx={{ mb: 2 }}
+          >
+            {isLoading ? <CircularProgress size={20} /> : 'Cari'}
+          </Button>
+
+          <input
+            type="file"
+            accept=".geojson,.json,.shp,.zip"
+            onChange={handleFileSelect}
+            style={{ marginBottom: '10px' }}
+            id="file-upload"
+            multiple
+          />
+          <label htmlFor="file-upload">
+            <Button
+              variant="contained"
+              component="span"
+              fullWidth
+              startIcon={<UploadIcon />}
+              sx={{ mb: 2 }}
+            >
+              Pilih File
+            </Button>
+          </label>
+
+          <Button
+            variant="contained"
+            onClick={handleFileSubmit}
+            fullWidth
+            sx={{ mb: 2 }}
+            disabled={isLoading || !selectedFile}
+            startIcon={isLoading ? <CircularProgress size={20} /> : <UploadIcon />}
+          >
+            {isLoading ? 'Uploading...' : 'Upload Layer'}
+          </Button>
 
           <Typography variant="subtitle1" sx={{ mb: 1 }}>
             Upload Layer
@@ -652,35 +845,7 @@ function Map() {
             <span style={{ fontSize: '12px' }}>{selectedOpacity}</span>
           </div>
 
-          <input
-            type="file"
-            accept=".geojson,.json,.shp,.zip"
-            onChange={handleFileSelect}
-            style={{ marginBottom: '10px' }}
-            id="file-upload"
-          />
-          <label htmlFor="file-upload">
-            <Button
-              variant="contained"
-              component="span"
-              fullWidth
-              startIcon={<UploadIcon />}
-              sx={{ mb: 2 }}
-            >
-              Pilih File
-            </Button>
-          </label>
-
-          <Button
-            variant="contained"
-            onClick={handleFileSubmit}
-            fullWidth
-            sx={{ mb: 2 }}
-            disabled={isLoading || !selectedFile}
-            startIcon={isLoading ? <CircularProgress size={20} /> : <UploadIcon />}
-          >
-            {isLoading ? 'Uploading...' : 'Upload Layer'}
-          </Button>
+          
 
           {/* Layer List */}
           {layers.length > 0 && (
@@ -924,49 +1089,48 @@ function Map() {
       </Menu>
 
       {/* Legend */}
-      {classifyField && Object.keys(categoryColors).length > 0 && !categoryColors.__numeric && (
-        <div style={{ position: 'absolute', top: 90, right: 20, background: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', zIndex: 1000 }}>
-          <b>Legenda: {classifyField}</b>
+      {classifyField === 'FUNGSI' ? (
+        <div style={{ position: 'absolute', top: 70, right: 20, background: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', zIndex: 1000 }}>
+          <b>Legenda: Kawasan Konservasi</b>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {Object.entries(categoryColors).map(([val, color]) => (
-              <li key={val} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+            {Object.entries(colorMap).map(([fungsi, color]) => (
+              <li key={fungsi} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
                 <input
                   type="color"
-                  value={color}
-                  onChange={e => setCustomCategoryColors({ ...customCategoryColors, [val]: e.target.value })}
+                  value={customCategoryColors[fungsi] || color}
+                  onChange={e => {
+                    const newColors = { ...customCategoryColors, [fungsi]: e.target.value };
+                    setCustomCategoryColors(newColors);
+                    // Update colorMap juga
+                    colorMap[fungsi] = e.target.value;
+                  }}
                   style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
                 />
-                <span>{val || '(kosong)'}</span>
+                <span>{fungsi}</span>
               </li>
             ))}
           </ul>
         </div>
+      ) : (
+        classifyField && Object.keys(categoryColors).length > 0 && !categoryColors.__numeric && (
+          <div style={{ position: 'absolute', top: 70, right: 20, background: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', zIndex: 1000 }}>
+            <b>Legenda: {classifyField}</b>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {Object.entries(categoryColors).map(([val, color]) => (
+                <li key={val} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                  <input
+                    type="color"
+                    value={color}
+                    onChange={e => setCustomCategoryColors({ ...customCategoryColors, [val]: e.target.value })}
+                    style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
+                  />
+                  <span>{val || '(kosong)'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
       )}
-
-      <Paper
-        elevation={3}
-        sx={{
-          position: 'absolute',
-          top: 20,
-          left: 20,
-          zIndex: 1000,
-          p: 2,
-          borderRadius: 2,
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',
-          backdropFilter: 'blur(8px)',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-          transition: 'all 0.3s ease',
-          '&:hover': {
-            boxShadow: '0 6px 12px rgba(0, 0, 0, 0.15)',
-            transform: 'translateY(-2px)'
-          }
-        }}
-      >
-        <Typography variant="h6" sx={{ mb: 2, color: theme.palette.primary.main, fontWeight: 600 }}>
-          WebGIS Application
-        </Typography>
-        <SearchBox onFileUpload={handleFileSubmit} />
-      </Paper>
     </Box>
   );
 }

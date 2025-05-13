@@ -106,34 +106,6 @@ export const SearchBox = ({ onFileUpload }) => {
         >
           {isLoading ? <CircularProgress size={24} /> : 'Search'}
         </Button>
-
-        <Typography variant="subtitle1" sx={{ mb: 2, color: theme.palette.text.primary, fontWeight: 500 }}>
-          Upload Data
-        </Typography>
-
-        <Button
-          component="label"
-          variant="outlined"
-          fullWidth
-          startIcon={<CloudUploadIcon />}
-          sx={{
-            borderRadius: 2,
-            textTransform: 'none',
-            borderStyle: 'dashed',
-            borderWidth: 2,
-            '&:hover': {
-              borderWidth: 2,
-            },
-          }}
-        >
-          {selectedFile ? selectedFile.name : 'Choose File'}
-          <input
-            type="file"
-            hidden
-            accept=".geojson,.shp,.zip"
-            onChange={handleFileChange}
-          />
-        </Button>
       </Paper>
     </Box>
   );
