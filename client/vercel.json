@@ -28,6 +28,10 @@
     {
       "src": "/(.*)",
       "dest": "/index.html"
+    },
+    {
+      "src": "/kkbksda.geojson",
+      "dest": "/kkbksda.geojson"
     }
   ]
 } 
