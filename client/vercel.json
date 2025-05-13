@@ -26,12 +26,16 @@
       "dest": "/logo512.png"
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    },
-    {
       "src": "/kkbksda.geojson",
       "dest": "/kkbksda.geojson"
+    },
+    {
+      "src": "/(.*)\\.(geojson|json|png|ico|txt|csv)",
+      "dest": "/$1.$2"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ]
 } 
