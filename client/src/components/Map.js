@@ -397,49 +397,9 @@ function Map() {
     setMarkers(markers.filter((_, i) => i !== index));
   };
 
+  // Remove the useEffect that was initializing draw control manually
   useEffect(() => {
     if (!mapRef.current) return;
-
-    // Inisialisasi FeatureGroup untuk menyimpan hasil gambar
-    const drawnItems = new L.FeatureGroup();
-    mapRef.current.addLayer(drawnItems);
-
-    // Inisialisasi Draw Control
-    const drawControl = new L.Control.Draw({
-      position: 'bottomright',
-      draw: {
-        polygon: true,
-        rectangle: false,
-        circle: false,
-        circlemarker: false,
-        marker: false,
-        polyline: false
-      },
-      edit: {
-        featureGroup: drawnItems
-      }
-    });
-
-    mapRef.current.addControl(drawControl);
-
-    // Event handlers
-    mapRef.current.on(L.Draw.Event.CREATED, (e) => {
-      const layer = e.layer;
-      drawnItems.addLayer(layer);
-      if (_onCreated) _onCreated(e);
-    });
-
-    mapRef.current.on(L.Draw.Event.EDITED, (e) => {
-      if (_onEdited) _onEdited(e);
-    });
-
-    mapRef.current.on(L.Draw.Event.DELETED, (e) => {
-      if (_onDeleted) _onDeleted(e);
-    });
-
-    return () => {
-      mapRef.current.removeControl(drawControl);
-    };
   }, [mapRef.current]);
 
   return (
