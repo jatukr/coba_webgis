@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { LayersControl, GeoJSON, FeatureGroup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, LayersControl, GeoJSON, FeatureGroup } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
@@ -21,7 +20,8 @@ import {
   Switch,
   FormControlLabel,
   Menu,
-  MenuItem
+  MenuItem,
+  Paper
 } from '@mui/material';
 import { 
   Brightness4, 
@@ -38,6 +38,7 @@ import { saveAs } from 'file-saver';
 import * as shpwrite from 'shp-write';
 import JSZip from 'jszip';
 import chroma from 'chroma-js';
+import { SearchBox } from './SearchBox';
 
 // Fix for default marker icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -46,6 +47,27 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
+
+// Create a separate component for EditControl
+const DrawControl = ({ onCreated, onEdited, onDeleted }) => {
+  return (
+    <FeatureGroup>
+      <EditControl
+        position="topright"
+        onCreated={onCreated}
+        onEdited={onEdited}
+        onDeleted={onDeleted}
+        draw={{
+          rectangle: false,
+          circle: false,
+          circlemarker: false,
+          marker: false,
+          polyline: false
+        }}
+      />
+    </FeatureGroup>
+  );
+};
 
 function Map() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,6 +99,8 @@ function Map() {
   const [categoryColors, setCategoryColors] = useState({});
   const [customCategoryColors, setCustomCategoryColors] = useState({});
   const mapRef = useRef();
+  const [uploadedLayers, setUploadedLayers] = useState([]);
+  const [layerNames, setLayerNames] = useState({});
 
   // Style options
   const styleOptions = [
@@ -419,12 +443,15 @@ function Map() {
   }, [mapRef.current]);
 
   return (
-    <div style={{ 
+    <Box sx={{ 
       position: 'relative', 
-      height: '100vh', 
-      width: '100%',
-      backgroundColor: isDarkMode ? '#121212' : '#ffffff',
-      color: isDarkMode ? '#ffffff' : '#000000'
+      width: '100%', 
+      height: '100vh',
+      '& .leaflet-container': {
+        height: '100%',
+        width: '100%',
+        zIndex: 1
+      }
     }}>
       <AppBar 
         position="static" 
@@ -462,41 +489,38 @@ function Map() {
       <MapContainer
         center={[-6.2088, 106.8456]}
         zoom={13}
-        style={{ height: 'calc(100vh - 64px)', width: '100%' }}
-        zoomControl={false}
-        whenCreated={mapInstance => { mapRef.current = mapInstance; }}
+        style={{ height: '100%', width: '100%' }}
+        ref={mapRef}
       >
         <LayersControl position="bottomright">
           <LayersControl.BaseLayer checked name="OpenStreetMap">
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              crossOrigin="anonymous"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Satellite">
             <TileLayer
-              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              crossOrigin="anonymous"
+              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
             />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Terrain">
             <TileLayer
-              attribution='&copy; <a href="https://www.stamen.com">Stamen Design</a>'
-              url="https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg"
+              url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+              attribution='&copy; <a href="https://opentopomap.org">OpenTopoMap</a> contributors'
             />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Dark">
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="OSM Indonesia">
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://tile.openstreetmap.id/hot/{z}/{x}/{y}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             />
           </LayersControl.BaseLayer>
 
@@ -562,9 +586,11 @@ function Map() {
           ))}
         </LayersControl>
 
-        <FeatureGroup ref={featureGroupRef}>
-          {/* EditControl is removed as per the new implementation */}
-        </FeatureGroup>
+        <DrawControl
+          onCreated={_onCreated}
+          onEdited={_onEdited}
+          onDeleted={_onDeleted}
+        />
 
         <div className="leaflet-control-container">
           <div className="leaflet-control-zoom leaflet-bar leaflet-control" style={{ position: 'absolute', bottom: '20px', left: '10px' }}>
@@ -599,34 +625,7 @@ function Map() {
             Kontrol Peta
           </Typography>
 
-          <Tooltip title="Cari lokasi di peta">
-            <TextField
-              fullWidth
-              size="small"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari lokasi..."
-              sx={{ mb: 1 }}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleSearch();
-                }
-              }}
-              InputProps={{
-                startAdornment: <SearchIcon sx={{ mr: 1, color: 'action.active' }} />,
-              }}
-            />
-          </Tooltip>
-
-          <Button 
-            variant="contained" 
-            onClick={handleSearch}
-            fullWidth
-            sx={{ mb: 2 }}
-            disabled={isLoading}
-          >
-            {isLoading ? <CircularProgress size={24} /> : 'Cari'}
-          </Button>
+          <SearchBox onFileUpload={handleFileSubmit} />
 
           <Typography variant="subtitle1" sx={{ mb: 1 }}>
             Upload Layer
@@ -983,7 +982,32 @@ function Map() {
           </ul>
         </div>
       )}
-    </div>
+
+      <Paper
+        elevation={3}
+        sx={{
+          position: 'absolute',
+          top: 20,
+          left: 20,
+          zIndex: 1000,
+          p: 2,
+          borderRadius: 2,
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            boxShadow: '0 6px 12px rgba(0, 0, 0, 0.15)',
+            transform: 'translateY(-2px)'
+          }
+        }}
+      >
+        <Typography variant="h6" sx={{ mb: 2, color: theme.palette.primary.main, fontWeight: 600 }}>
+          WebGIS Application
+        </Typography>
+        <SearchBox onFileUpload={handleFileSubmit} />
+      </Paper>
+    </Box>
   );
 }
 
