@@ -1,0 +1,34 @@
+{
+  "name": "webgis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebGIS Application",
+  "main": "server.js",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "dev": "nodemon server.js",
+    "client": "cd client && npm start",
+    "dev:full": "concurrently \"npm run dev\" \"npm run client\""
+  },
+  "dependencies": {
+    "chroma-js": "^3.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
+    "pg": "^8.11.3",
+    "shp-write": "^0.3.2"
+  },
+  "devDependencies": {
+    "@craco/craco": "^7.1.0",
+    "assert": "^2.1.0",
+    "buffer": "^6.0.3",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.2",
+    "process": "^0.11.10"
+  }
+}
