@@ -160,9 +160,6 @@ function Map() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null);
   const [selectedLayerForExport, setSelectedLayerForExport] = useState(null);
-  const [classifyField, setClassifyField] = useState('');
-  const [fieldOptions, setFieldOptions] = useState([]);
-  const [categoryColors, setCategoryColors] = useState({});
   const [customCategoryColors, setCustomCategoryColors] = useState({});
   const mapRef = useRef();
   const [uploadedLayers, setUploadedLayers] = useState([]);
@@ -209,59 +206,6 @@ function Map() {
     localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
     document.body.style.backgroundColor = isDarkMode ? '#121212' : '#ffffff';
   }, [isDarkMode]);
-
-  // Update field options when a layer is selected/uploaded
-  useEffect(() => {
-    if (layers.length > 0) {
-      // Ambil field dari layer terakhir yang diupload
-      const lastLayer = layers[layers.length - 1];
-      const features = lastLayer.data.features || [];
-      if (features.length > 0) {
-        const fields = Object.keys(features[0].properties || {});
-        setFieldOptions(fields);
-        // Otomatis pilih field FUNGSI jika ada
-        if (fields.includes('FUNGSI')) {
-          setClassifyField('FUNGSI');
-        } else if (!classifyField && fields.length > 0) {
-          setClassifyField(fields[0]);
-        }
-      }
-    }
-  }, [layers, classifyField]);
-
-  // Tambahkan helper untuk cek numerik
-  const isNumericField = (features, field) => {
-    return features.every(f => {
-      const v = f.properties?.[field];
-      return v === null || v === undefined || (!isNaN(parseFloat(v)) && isFinite(v));
-    });
-  };
-
-  // Update color map for unique values in selected field
-  useEffect(() => {
-    if (!classifyField || layers.length === 0) return;
-    const lastLayer = layers[layers.length - 1];
-    const features = lastLayer.data.features || [];
-    if (features.length === 0) return;
-
-    if (isNumericField(features, classifyField)) {
-      // Numeric: use color ramp
-      const values = features.map(f => parseFloat(f.properties[classifyField])).filter(v => !isNaN(v));
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      setCategoryColors({ __numeric: true, min, max });
-    } else {
-      // Categorical: unique color per value
-      const uniqueValues = Array.from(new Set(features.map(f => f.properties?.[classifyField])));
-      const colorScale = chroma.scale('Set2').colors(uniqueValues.length);
-      const colorMap = {};
-      uniqueValues.forEach((val, idx) => {
-        // Prioritaskan warna custom jika ada
-        colorMap[val] = customCategoryColors[val] || colorScale[idx];
-      });
-      setCategoryColors(colorMap);
-    }
-  }, [classifyField, layers, customCategoryColors]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -379,7 +323,9 @@ function Map() {
         style: selectedStyle,
         weight: selectedWeight,
         opacity: selectedOpacity,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        classifyField: '',
+        categoryColors: {}
       };
 
       setLayers([...layers, newLayer]);
@@ -476,7 +422,6 @@ function Map() {
     setMarkers(markers.filter((_, i) => i !== index));
   };
 
-
   // Remove the useEffect that was initializing draw control manually
   useEffect(() => {
     if (!mapRef.current) return;
@@ -496,11 +441,13 @@ function Map() {
               id: 'kawasan-konservasi',
               name: 'Kawasan Konservasi',
               data: data,
-              color: '#3388ff', // warna default (tidak digunakan karena akan pakai colorMap)
+              color: '#3388ff',
               style: 'solid',
               weight: 3,
               opacity: 0.2,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
+              classifyField: 'FUNGSI',
+              categoryColors: colorMap
             }
           ]);
         }
@@ -605,18 +552,17 @@ function Map() {
               <GeoJSON 
                 data={layer.data}
                 style={feature => {
-                  // Untuk layer kawasan konservasi, gunakan colorMap berdasarkan FUNGSI
-                  if (layer.id === 'kawasan-konservasi') {
-                    const fungsi = feature.properties.FUNGSI;
+                  if (layer.classifyField) {
+                    const value = feature.properties[layer.classifyField];
                     return {
-                      color: colorMap[fungsi] || '#3388ff',
-                      weight: 3,
+                      color: layer.categoryColors[value] || '#3388ff',
+                      weight: layer.weight,
                       opacity: 1,
-                      fillOpacity: 0.5,
-                      fillColor: colorMap[fungsi] || '#3388ff'
+                      fillOpacity: layer.opacity,
+                      fillColor: layer.categoryColors[value] || '#3388ff'
                     };
                   }
-                  // Untuk layer lain, gunakan style dari layer properties
+                  // Jika tidak ada klasifikasi, gunakan style default
                   return {
                     color: layer.color,
                     weight: layer.weight,
@@ -845,8 +791,6 @@ function Map() {
             <span style={{ fontSize: '12px' }}>{selectedOpacity}</span>
           </div>
 
-          
-
           {/* Layer List */}
           {layers.length > 0 && (
             <div style={{ marginTop: '20px' }}>
@@ -973,24 +917,77 @@ function Map() {
                   <div style={{ fontSize: '10px', color: 'gray', marginTop: '5px' }}>
                     Diupload: {new Date(layer.timestamp).toLocaleString()}
                   </div>
+                  {layer.data.features && layer.data.features.length > 0 && (
+                    <div style={{ marginTop: '10px' }}>
+                      <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px' }}>
+                        Klasifikasi Warna:
+                      </label>
+                      <select
+                        value={layer.classifyField || ''}
+                        onChange={e => {
+                          const field = e.target.value;
+                          const features = layer.data.features;
+                          let newCategoryColors = {};
+                          if (field) {
+                            if (layer.id === 'kawasan-konservasi' && field === 'FUNGSI') {
+                              newCategoryColors = colorMap;
+                            } else {
+                              const uniqueValues = Array.from(new Set(features.map(f => f.properties?.[field])));
+                              const colorScale = chroma.scale('Set2').colors(uniqueValues.length);
+                              uniqueValues.forEach((val, idx) => {
+                                newCategoryColors[val] = colorScale[idx];
+                              });
+                            }
+                          }
+                          setLayers(layers.map(l =>
+                            l.id === layer.id
+                              ? { ...l, classifyField: field, categoryColors: newCategoryColors }
+                              : l
+                          ));
+                        }}
+                        style={{ width: '100%', padding: '4px', fontSize: '12px' }}
+                      >
+                        <option value="">Tidak ada klasifikasi</option>
+                        {Object.keys(layer.data.features[0].properties || {}).map(field => (
+                          <option key={field} value={field}>{field}</option>
+                        ))}
+                      </select>
+                      {/* Legenda */}
+                      {layer.classifyField && Object.keys(layer.categoryColors).length > 0 && (
+                        <div style={{ marginTop: '5px', fontSize: '12px' }}>
+                          <b>Legenda:</b>
+                          <ul style={{ listStyle: 'none', padding: 0, margin: '5px 0' }}>
+                            {Object.entries(layer.categoryColors).map(([value, color]) => (
+                              <li key={value} style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+                                <input
+                                  type="color"
+                                  value={color}
+                                  onChange={e => {
+                                    setLayers(layers.map(l => {
+                                      if (l.id === layer.id) {
+                                        return {
+                                          ...l,
+                                          categoryColors: {
+                                            ...l.categoryColors,
+                                            [value]: e.target.value
+                                          }
+                                        };
+                                      }
+                                      return l;
+                                    }));
+                                  }}
+                                  style={{ width: 20, height: 20, marginRight: 5 }}
+                                />
+                                <span>{value || '(kosong)'}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* Tambahkan dropdown di drawer untuk memilih field klasifikasi */}
-          {layers.length > 0 && fieldOptions.length > 0 && (
-            <div style={{ marginBottom: '10px' }}>
-              <label style={{ display: 'block', marginBottom: '5px' }}>Klasifikasi Warna Berdasarkan:</label>
-              <select
-                value={classifyField}
-                onChange={e => setClassifyField(e.target.value)}
-                style={{ width: '100%', padding: '8px', borderRadius: '4px' }}
-              >
-                {fieldOptions.map(field => (
-                  <option key={field} value={field}>{field}</option>
-                ))}
-              </select>
             </div>
           )}
 
@@ -1088,49 +1085,58 @@ function Map() {
         </MenuItem>
       </Menu>
 
-      {/* Legend */}
-      {classifyField === 'FUNGSI' ? (
-        <div style={{ position: 'absolute', top: 70, right: 20, background: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', zIndex: 1000 }}>
-          <b>Legenda: Kawasan Konservasi</b>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {Object.entries(colorMap).map(([fungsi, color]) => (
-              <li key={fungsi} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                <input
-                  type="color"
-                  value={customCategoryColors[fungsi] || color}
-                  onChange={e => {
-                    const newColors = { ...customCategoryColors, [fungsi]: e.target.value };
-                    setCustomCategoryColors(newColors);
-                    // Update colorMap juga
-                    colorMap[fungsi] = e.target.value;
-                  }}
-                  style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
-                />
-                <span>{fungsi}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        classifyField && Object.keys(categoryColors).length > 0 && !categoryColors.__numeric && (
-          <div style={{ position: 'absolute', top: 70, right: 20, background: '#fff', padding: 10, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', zIndex: 1000 }}>
-            <b>Legenda: {classifyField}</b>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {Object.entries(categoryColors).map(([val, color]) => (
-                <li key={val} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                  <input
-                    type="color"
-                    value={color}
-                    onChange={e => setCustomCategoryColors({ ...customCategoryColors, [val]: e.target.value })}
-                    style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
-                  />
-                  <span>{val || '(kosong)'}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      )}
+      {(() => {
+        const getLegendHeight = (layer) => 40 + Object.keys(layer.categoryColors).length * 28 + 10;
+        let legendTop = 70;
+        return layers.filter(l => l.classifyField).map((layer, idx) => {
+          const style = {
+            position: 'absolute',
+            top: legendTop,
+            right: 20,
+            marginTop: idx > 0 ? 20 : 0,
+            background: isDarkMode ? '#2d2d2d' : '#ffffff',
+            padding: 10,
+            borderRadius: 8,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            zIndex: 1000,
+            color: isDarkMode ? '#ffffff' : '#000000',
+            maxWidth: '250px'
+          };
+          const el = (
+            <div key={layer.id} style={style}>
+              <b>Legenda: {layer.name} - {layer.classifyField}</b>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {Object.entries(layer.categoryColors).map(([value, color]) => (
+                  <li key={value} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={e => {
+                        setLayers(layers.map(l => {
+                          if (l.id === layer.id) {
+                            return {
+                              ...l,
+                              categoryColors: {
+                                ...l.categoryColors,
+                                [value]: e.target.value
+                              }
+                            };
+                          }
+                          return l;
+                        }));
+                      }}
+                      style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
+                    />
+                    <span>{value || '(kosong)'}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+          legendTop += getLegendHeight(layer) + 0; // 0 karena margin-top sudah diatur di style
+          return el;
+        });
+      })()}
     </Box>
   );
 }
