@@ -466,20 +466,17 @@ function Map() {
         height: '100%',
         width: '100%',
         zIndex: 1
-      },
-      '& .leaflet-control-layers': {
-        transform: 'translateX(-10px) !important'
       }
     }}>
       <AppBar 
-        position="static" 
-        color={isDarkMode ? "default" : "primary"}
-        sx={{ 
+        position="fixed"
+        sx={{
+          zIndex: (theme) => theme.zIndex.drawer + 2,
           backgroundColor: isDarkMode ? '#1f1f1f' : undefined,
           boxShadow: 1
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ minHeight: 40, height: 40, px: 2 }}>
           <IconButton
             edge="start"
             color="inherit"
@@ -503,6 +500,8 @@ function Map() {
           />
         </Toolbar>
       </AppBar>
+
+      {/* <Box sx={{ height: '64px' }} /> */}
 
       <MapContainer
         center={[-7.2558591714853, 112.74357814457998]}
@@ -657,6 +656,7 @@ function Map() {
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         sx={{
+          zIndex: 2001,
           '& .MuiDrawer-paper': {
             width: isMobile ? '100%' : 350,
             backgroundColor: isDarkMode ? '#1f1f1f' : '#ffffff',
@@ -1092,7 +1092,7 @@ function Map() {
           const style = {
             position: 'absolute',
             top: legendTop,
-            right: 20,
+            right: 10,
             marginTop: idx > 0 ? 20 : 0,
             background: isDarkMode ? '#2d2d2d' : '#ffffff',
             padding: 10,
