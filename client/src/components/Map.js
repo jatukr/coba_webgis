@@ -31,7 +31,8 @@ import {
   Upload as UploadIcon,
   Delete as DeleteIcon,
   FileDownload as FileDownloadIcon,
-  Room as RoomIcon
+  Room as RoomIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import * as shapefile from 'shapefile';
 import { saveAs } from 'file-saver';
@@ -161,9 +162,12 @@ function Map() {
   const [exportMenuAnchor, setExportMenuAnchor] = useState(null);
   const [selectedLayerForExport, setSelectedLayerForExport] = useState(null);
   const [customCategoryColors, setCustomCategoryColors] = useState({});
-  const mapRef = useRef();
+  const [mapInstance, setMapInstance] = useState(null);
   const [uploadedLayers, setUploadedLayers] = useState([]);
   const [layerNames, setLayerNames] = useState({});
+  const [legendOpen, setLegendOpen] = useState({});
+  const [classifyField, setClassifyField] = useState(null);
+  const [fieldOptions, setFieldOptions] = useState([]);
 
   // Style options
   const styleOptions = [
@@ -207,6 +211,26 @@ function Map() {
     document.body.style.backgroundColor = isDarkMode ? '#121212' : '#ffffff';
   }, [isDarkMode]);
 
+  useEffect(() => {
+    if (layers.length > 0) {
+      const lastLayer = layers[layers.length - 1];
+      const features = lastLayer.data.features || [];
+      if (features.length > 0) {
+        const fields = Object.keys(features[0].properties || {});
+        setFieldOptions(fields);
+        // Hanya set classifyField jika belum pernah dipilih user
+        if (!classifyField || !fields.includes(classifyField)) {
+          if (fields.includes('FUNGSI')) {
+            setClassifyField('FUNGSI');
+          } else if (fields.length > 0) {
+            setClassifyField(fields[0]);
+          }
+        }
+      }
+    }
+    // eslint-disable-next-line
+  }, [layers]);
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setIsLoading(true);
@@ -221,9 +245,8 @@ function Map() {
           name: data[0].display_name
         };
         setMarkers([...markers, newMarker]);
-        // Pindahkan tampilan peta ke lokasi hasil pencarian
-        if (mapRef.current) {
-          mapRef.current.setView(newMarker.position, 15, { animate: true });
+        if (mapInstance) {
+          mapInstance.setView(newMarker.position, 15, { animate: true });
         }
       }
     } catch (error) {
@@ -324,7 +347,7 @@ function Map() {
         weight: selectedWeight,
         opacity: selectedOpacity,
         timestamp: new Date().toISOString(),
-        classifyField: '',
+        classifyField: classifyField,
         categoryColors: {}
       };
 
@@ -423,9 +446,9 @@ function Map() {
   };
 
   // Remove the useEffect that was initializing draw control manually
-  useEffect(() => {
+  {/* useEffect(() => {
     if (!mapRef.current) return;
-  }, [mapRef.current]);
+  }, [mapRef.current]); */}
 
   useEffect(() => {
     // Load layer kawasan konservasi saat pertama kali buka
@@ -456,6 +479,14 @@ function Map() {
         console.error('Gagal load layer kawasan konservasi:', err);
       });
   }, []); // Hapus layers dari dependency array
+
+  useEffect(() => {
+    if (mapInstance) {
+      setMapInstance(mapInstance);
+      window._map = mapInstance;
+    }
+  }, [mapInstance]);
+
 
   return (
     <Box sx={{ 
@@ -507,8 +538,11 @@ function Map() {
         center={[-7.2558591714853, 112.74357814457998]}
         zoom={13}
         style={{ height: '100%', width: '100%' }}
-        ref={mapRef}
         zoomControl={false}
+        whenCreated={map => {
+          setMapInstance(map);
+          window._map = map;
+        }}
       >
         <LayersControl position="bottomright">
           <LayersControl.BaseLayer checked name="OpenStreetMap">
@@ -650,7 +684,7 @@ function Map() {
           </div>
         </div>
       </MapContainer>
-
+      
       <Drawer
         anchor="left"
         open={isDrawerOpen}
@@ -664,27 +698,41 @@ function Map() {
           }
         }}
       >
-        <Box sx={{ p: 2 }}>
+        <Box sx={{ p: 2, position: 'relative' }}>
+          {isMobile && (
+            <IconButton
+              onClick={() => setIsDrawerOpen(false)}
+              sx={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                zIndex: 10
+              }}
+              aria-label="Tutup"
+            >
+              <CloseIcon />
+            </IconButton>
+          )}
           <Typography variant="h6" sx={{ mb: 2 }}>
             Kontrol Peta
           </Typography>
 
-          <TextField
-            fullWidth
-            size="small"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari lokasi..."
-            sx={{ mb: 1 }}
-            onKeyPress={(e) => {
-              if (e.key === 'Enter') {
-                handleSearch();
-              }
-            }}
-            InputProps={{
-              startAdornment: <SearchIcon sx={{ mr: 1, color: 'action.active' }} />,
-            }}
-          />
+            <TextField
+              fullWidth
+              size="small"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari lokasi..."
+              sx={{ mb: 1 }}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleSearch();
+                }
+              }}
+              InputProps={{
+                startAdornment: <SearchIcon sx={{ mr: 1, color: 'action.active' }} />,
+              }}
+            />
           <Button
             variant="contained"
             onClick={handleSearch}
@@ -1018,7 +1066,7 @@ function Map() {
         <Box
           sx={{
             position: 'absolute',
-            top: 80,
+            top: 60,
             left: 10,
             right: 10,
             zIndex: 1000,
@@ -1085,14 +1133,15 @@ function Map() {
         </MenuItem>
       </Menu>
 
-      {(() => {
+      {!isMobile && (() => {
         const getLegendHeight = (layer) => 40 + Object.keys(layer.categoryColors).length * 28 + 10;
         let legendTop = 70;
         return layers.filter(l => l.classifyField).map((layer, idx) => {
+          const isOpen = legendOpen[layer.id] !== false; // default true
           const style = {
             position: 'absolute',
             top: legendTop,
-            right: 10,
+            right: 20,
             marginTop: idx > 0 ? 20 : 0,
             background: isDarkMode ? '#2d2d2d' : '#ffffff',
             padding: 10,
@@ -1100,40 +1149,62 @@ function Map() {
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
             zIndex: 1000,
             color: isDarkMode ? '#ffffff' : '#000000',
-            maxWidth: '250px'
+            maxWidth: '250px',
+            width: isMobile ? '90vw' : undefined, // responsive width
+            minWidth: 200
           };
           const el = (
             <div key={layer.id} style={style}>
-              <b>Legenda: {layer.name} - {layer.classifyField}</b>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {Object.entries(layer.categoryColors).map(([value, color]) => (
-                  <li key={value} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-                    <input
-                      type="color"
-                      value={color}
-                      onChange={e => {
-                        setLayers(layers.map(l => {
-                          if (l.id === layer.id) {
-                            return {
-                              ...l,
-                              categoryColors: {
-                                ...l.categoryColors,
-                                [value]: e.target.value
-                              }
-                            };
-                          }
-                          return l;
-                        }));
-                      }}
-                      style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
-                    />
-                    <span>{value || '(kosong)'}</span>
-                  </li>
-                ))}
-              </ul>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                <b>Legenda: {layer.name} - {layer.classifyField}</b>
+                {isMobile && (
+                  <button
+                    style={{
+                      marginLeft: 8,
+                      background: 'none',
+                      border: 'none',
+                      color: isDarkMode ? '#fff' : '#000',
+                      fontWeight: 'bold',
+                      fontSize: 18,
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => setLegendOpen(prev => ({...prev, [layer.id]: !isOpen}))}
+                  >
+                    {isOpen ? '−' : '+'}
+                  </button>
+                )}
+              </div>
+              {isOpen && (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {Object.entries(layer.categoryColors).map(([value, color]) => (
+                    <li key={value} style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                      <input
+                        type="color"
+                        value={color}
+                        onChange={e => {
+                          setLayers(layers.map(l => {
+                            if (l.id === layer.id) {
+                              return {
+                                ...l,
+                                categoryColors: {
+                                  ...l.categoryColors,
+                                  [value]: e.target.value
+                                }
+                              };
+                            }
+                            return l;
+                          }));
+                        }}
+                        style={{ width: 24, height: 24, marginRight: 8, border: '1px solid #ccc', borderRadius: 3, background: 'none', padding: 0 }}
+                      />
+                      <span>{value || '(kosong)'}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           );
-          legendTop += getLegendHeight(layer) + 0; // 0 karena margin-top sudah diatur di style
+          legendTop += getLegendHeight(layer) + 0;
           return el;
         });
       })()}
