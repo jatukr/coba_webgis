@@ -557,6 +557,24 @@ function Map() {
               attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
             />
           </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Satellite with Labels">
+            <TileLayer
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Satellite with Roads">
+            <TileLayer
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}"
+              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Satellite with Terrain">
+            <TileLayer
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/Reference/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}"
+              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+            />
+          </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Terrain">
             <TileLayer
               url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
